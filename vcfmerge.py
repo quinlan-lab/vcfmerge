@@ -2,8 +2,9 @@
 Merge two VCFs with the same samples, or a subset of the same
 samples, for example, a VCF of structural variants and one of
 small (GATK-called) variants
-This will output the variants from file A first, followed by those
-from file B. The caller is responsible for sorting.
+This will output the variants in sorted order if the input is sorted.
+For this reason, it is best to sort the smaller SV VCF so that it has
+the same chromosome ordering as the GATK VCF.
 """
 
 from __future__ import print_function
@@ -16,7 +17,7 @@ from collections import OrderedDict
 xopen = lambda f: gzip.open(f) if f.endswith(".gz") else open(f)
 
 def get_header(path):
-    _patt=re.compile("(\w+)=<ID=([^,]+),.+")
+    _patt=re.compile("(\w+)=<ID=([^,]+),?.*")
     header = dict(infos=OrderedDict(), formats=OrderedDict(),
                   contigs=OrderedDict(), filters=OrderedDict(),
                   other=[], samples=[])
@@ -88,7 +89,7 @@ def all_unknown_or_ref(samples):
     ss = (s.split(":", 1)[0] for s in samples)
     return all(s in ('.', './.', '0/0', '.|.', '0|0') for s in ss)
 
-def write_vcf_body(path, hdr, remove_ref=False, file=sys.stdout):
+def write_vcf_body(path, hdr, file_idx, remove_ref=False, file=sys.stdout):
     idxs = [h[0] for h in hdr['idxs']]
     skipped, tot = 0, 0
     for line in xopen(path):
@@ -104,7 +105,8 @@ def write_vcf_body(path, hdr, remove_ref=False, file=sys.stdout):
         toks = toks[:9] + samples
         if toks[3] == "N" and toks[4][0] == "<":
             toks[3] = "." # fix lumpy ref call of 'N'
-        print("\t".join(toks), file=file)
+
+        yield toks[0], int(toks[1]), file_idx, toks
     if remove_ref:
         print(">> skipped %d ref/unknown variants out of %d from %s"
                 % (skipped, tot, path), file=sys.stderr)
@@ -115,8 +117,43 @@ def main(vcf1, vcf2, remove_ref=False):
     header = combine_headers(h1, h2)
     print(header_str(header))
 
-    write_vcf_body(vcf1, h1, remove_ref)
-    write_vcf_body(vcf2, h2, remove_ref)
+    pq = []
+    gen1 = write_vcf_body(vcf1, h1, 0, remove_ref)
+    gen2 = write_vcf_body(vcf2, h2, 1, remove_ref)
+
+    gens = [gen1, gen2]
+
+    import heapq
+    for g in gens:
+        heapq.heappush(pq, next(g))
+
+    last_chrom = None
+    while pq:
+        chrom, pos, i, toks = heapq.heappop(pq)
+
+        # switch chroms, clear out the heap and start over.
+        if last_chrom != chrom and last_chrom is not None:
+            print("\t".join(toks))
+            chrom, pos, i, toks = heapq.heappop(pq)
+            print("\t".join(toks))
+            for k in range(2):
+                try:
+                    heapq.heappush(pq, next(gens[k]))
+                except StopIteration:
+                    pass
+            if pq == []:
+                break
+            chrom, pos, i, toks = heapq.heappop(pq)
+
+        last_chrom = chrom
+
+        try:
+            heapq.heappush(pq, next(gens[i]))
+        except StopIteration:
+            pass
+        except:
+            raise
+        print("\t".join(toks))
 
 if __name__ == "__main__":
     import argparse
