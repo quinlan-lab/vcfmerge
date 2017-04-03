@@ -126,26 +126,31 @@ def main(vcf1, vcf2, remove_ref=False):
     import heapq
     for g in gens:
         heapq.heappush(pq, next(g))
+    seen_chroms = set()
 
     last_chrom = None
     while pq:
         chrom, pos, i, toks = heapq.heappop(pq)
 
         # switch chroms, clear out the heap and start over.
-        if last_chrom != chrom and last_chrom is not None:
-            print("\t".join(toks))
-            chrom, pos, i, toks = heapq.heappop(pq)
-            print("\t".join(toks))
-            for k in range(2):
-                try:
-                    heapq.heappush(pq, next(gens[k]))
-                except StopIteration:
-                    pass
-            if pq == []:
-                break
-            chrom, pos, i, toks = heapq.heappop(pq)
+        if last_chrom != chrom:
+            if last_chrom is not None:
+                print("\t".join(toks))
+                chrom, pos, i, toks = heapq.heappop(pq)
+                print("\t".join(toks))
+                for k in range(2):
+                    try:
+                        heapq.heappush(pq, next(gens[k]))
+                    except StopIteration:
+                        pass
+                if pq == []:
+                    break
+                chrom, pos, i, toks = heapq.heappop(pq)
 
-        last_chrom = chrom
+            if chrom in seen_chroms:
+                raise Exception("chromosome %s seen previously. out of order after: %s" % chrom, last_chrom)
+            seen_chroms.add(chrom)
+            last_chrom = chrom
 
         try:
             heapq.heappush(pq, next(gens[i]))
