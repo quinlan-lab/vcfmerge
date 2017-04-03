@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 Merge two VCFs with the same samples, or a subset of the same
 samples, for example, a VCF of structural variants and one of
