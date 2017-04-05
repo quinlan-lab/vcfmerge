@@ -94,10 +94,12 @@ def all_unknown_or_ref(samples):
 def write_vcf_body(path, hdr, file_idx, remove_ref=False, file=sys.stdout):
     idxs = [h[0] for h in hdr['idxs']]
     skipped, tot = 0, 0
+    chrom_lookup = {}
     for line in xopen(path):
         if line[0] == "#": continue
         toks = line.rstrip().split("\t")
         samples = toks[9:]
+        if toks[0][0] == "G" and toks[0][1] == "L": break
         tot += 1
 
         samples = [samples[i] for i in idxs]
@@ -107,8 +109,12 @@ def write_vcf_body(path, hdr, file_idx, remove_ref=False, file=sys.stdout):
         toks = toks[:9] + samples
         if toks[3] == "N" and toks[4][0] == "<":
             toks[3] = "." # fix lumpy ref call of 'N'
+        chrom_order = chrom_lookup.get(toks[0])
+        if chrom_order is None:
+            chrom_lookup[toks[0]] = len(chrom_lookup)
+            chrom_order = chrom_lookup[toks[0]]
 
-        yield toks[0], int(toks[1]), file_idx, toks
+        yield chrom_order, int(toks[1]), toks[0], file_idx, toks
     if remove_ref:
         print(">> skipped %d ref/unknown variants out of %d from %s"
                 % (skipped, tot, path), file=sys.stderr)
@@ -132,14 +138,17 @@ def main(vcf1, vcf2, remove_ref=False):
 
     last_chrom = None
     while pq:
-        chrom, pos, i, toks = heapq.heappop(pq)
+        _ichrom, pos, chrom, i, toks = heapq.heappop(pq)
 
         # switch chroms, clear out the heap and start over.
         if last_chrom != chrom:
             if last_chrom is not None:
                 print("\t".join(toks))
-                chrom, pos, i, toks = heapq.heappop(pq)
-                print("\t".join(toks))
+                try:
+                    _ichrom, pos, chrom, i, toks = heapq.heappop(pq)
+                    print("\t".join(toks))
+                except:
+                    pass
                 for k in range(2):
                     try:
                         heapq.heappush(pq, next(gens[k]))
@@ -147,10 +156,10 @@ def main(vcf1, vcf2, remove_ref=False):
                         pass
                 if pq == []:
                     break
-                chrom, pos, i, toks = heapq.heappop(pq)
+                _ichrom, pos, chrom, i, toks = heapq.heappop(pq)
 
             if chrom in seen_chroms:
-                raise Exception("chromosome %s seen previously. out of order after: %s" % chrom, last_chrom)
+                raise Exception("chromosome %s seen previously. out of order after: %s" % (chrom, last_chrom))
             seen_chroms.add(chrom)
             last_chrom = chrom
 
